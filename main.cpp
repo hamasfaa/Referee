@@ -25,18 +25,10 @@ static const double thresholdAreaBall = 150.0;
 
 int main(int, char **)
 {
-    string path = "../video/video1.mp4";
+    string path = "../video/video3.mp4";
     VideoCapture cap(path);
     Mat frame, frameHSV, frameBlur, frameHSL;
     Mat maskLapangan, maskTeamA, kernel, maskBall, maskLine;
-
-    // namedWindow("TrackbarsLapangan", (640, 200));
-    // createTrackbar("Hue Min", "TrackbarsLapangan", &hminLapangan, 255);
-    // createTrackbar("Hue Max", "TrackbarsLapangan", &hmaxLapangan, 255);
-    // createTrackbar("Sat Min", "TrackbarsLapangan", &sminLapangan, 255);
-    // createTrackbar("Sat Max", "TrackbarsLapangan", &smaxLapangan, 255);
-    // createTrackbar("Val Min", "TrackbarsLapangan", &vminLapangan, 255);
-    // createTrackbar("Val Max", "TrackbarsLapangan", &vmaxLapangan, 255);
 
     while (true)
     {
@@ -66,6 +58,10 @@ int main(int, char **)
         findContours(maskBall, contoursBall, hierarchyBall, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
 
         vector<Rect> boundingRects;
+        Rect largestRectLapangan;
+        int largestIndex = -1;
+        double maxArea = 0;
+
         for (size_t i = 0; i < contoursLapangan.size(); i++)
         {
             double area = contourArea(contoursLapangan[i]);
@@ -76,7 +72,7 @@ int main(int, char **)
 
                 for (auto &rect : boundingRects)
                 {
-                    if ((abs(boundingRectLapangan.x - rect.x) < 1000) && (abs(boundingRectLapangan.y - rect.y) < 1000))
+                    if ((abs(boundingRectLapangan.x - rect.x) < 1200) && (abs(boundingRectLapangan.y - rect.y) < 1200))
                     {
                         rect |= boundingRectLapangan;
                         merged = true;
@@ -88,12 +84,51 @@ int main(int, char **)
                 {
                     boundingRects.push_back(boundingRectLapangan);
                 }
+
+                if (area > maxArea)
+                {
+                    maxArea = area;
+                    largestRectLapangan = boundingRectLapangan;
+                    largestIndex = i;
+                }
             }
         }
 
         for (const auto &rect : boundingRects)
         {
             rectangle(frame, rect, Scalar(0, 255, 0), 2);
+        }
+
+        for (size_t k = 0; k < contoursBall.size(); k++)
+        {
+            double areaBall = contourArea(contoursBall[k]);
+            if (areaBall < thresholdAreaBall)
+            {
+                continue;
+            }
+
+            Point2f center;
+            float radius;
+            minEnclosingCircle(contoursBall[k], center, radius);
+            bool isBallInsideLapangan = false;
+
+            if (largestIndex != -1)
+            {
+                if (largestRectLapangan.contains(center))
+                {
+                    isBallInsideLapangan = true;
+                }
+            }
+
+            circle(frame, center, (int)radius, Scalar(0, 255, 0), 2);
+            if (isBallInsideLapangan)
+            {
+                putText(frame, "Bola di dalam lapangan", Point(10, 50), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
+            }
+            else
+            {
+                putText(frame, "Bola di luar lapangan", Point(10, 50), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 0, 255), 2);
+            }
         }
 
         imshow("Frame", frame);
