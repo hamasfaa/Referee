@@ -9,8 +9,12 @@ int hminLapangan = 70, sminLapangan = 186, vminLapangan = 146;
 int hmaxLapangan = 122, smaxLapangan = 255, vmaxLapangan = 255;
 
 // Team A
-int hminTeamA = 56, sminTeamA = 13, vminTeamA = 73;
-int hmaxTeamA = 139, smaxTeamA = 181, vmaxTeamA = 191;
+int hminTeamA = 72, sminTeamA = 13, vminTeamA = 73;
+int hmaxTeamA = 126, smaxTeamA = 135, vmaxTeamA = 191;
+
+// Team B
+int hminTeamB = 59, sminTeamB = 66, vminTeamB = 0;
+int hmaxTeamB = 255, smaxTeamB = 255, vmaxTeamB = 60;
 
 // Ball
 int hminBall = 0, sminBall = 162, vminBall = 125;
@@ -21,14 +25,23 @@ int hminLine = 0, sminLine = 149, vminLine = 0;
 int hmaxLine = 255, smaxLine = 255, vmaxLine = 255;
 
 static const double thresholdAreaTimA = 150.0;
+static const double thresholdAreaLapangan = 150.0;
 static const double thresholdAreaBall = 150.0;
 
 int main(int, char **)
 {
-    string path = "../video/video3.mp4";
+    string path = "../video/video2.mp4";
     VideoCapture cap(path);
     Mat frame, frameHSV, frameBlur, frameHSL;
-    Mat maskLapangan, maskTeamA, kernel, maskBall, maskLine;
+    Mat maskLapangan, maskTeamA, kernel, maskBall, maskLine, maskTeamB;
+
+    namedWindow("TrackbarsTeamB", (640, 200));
+    createTrackbar("Hue Min", "TrackbarsTeamB", &hminTeamB, 255);
+    createTrackbar("Hue Max", "TrackbarsTeamB", &hmaxTeamB, 255);
+    createTrackbar("Sat Min", "TrackbarsTeamB", &sminTeamB, 255);
+    createTrackbar("Sat Max", "TrackbarsTeamB", &smaxTeamB, 255);
+    createTrackbar("Val Min", "TrackbarsTeamB", &vminTeamB, 255);
+    createTrackbar("Val Max", "TrackbarsTeamB", &vmaxTeamB, 255);
 
     while (true)
     {
@@ -45,17 +58,19 @@ int main(int, char **)
 
         inRange(frameBlur, Scalar(hminLapangan, sminLapangan, vminLapangan), Scalar(hmaxLapangan, smaxLapangan, vmaxLapangan), maskLapangan);
         inRange(frameBlur, Scalar(hminTeamA, sminTeamA, vminTeamA), Scalar(hmaxTeamA, smaxTeamA, vmaxTeamA), maskTeamA);
+        inRange(frameBlur, Scalar(hminTeamB, sminTeamB, vminTeamB), Scalar(hmaxTeamB, smaxTeamB, vmaxTeamB), maskTeamB);
         inRange(frameBlur, Scalar(hminBall, sminBall, vminBall), Scalar(hmaxBall, smaxBall, vmaxBall), maskBall);
         inRange(frameHSL, Scalar(hminLine, sminLine, vminLine), Scalar(hmaxLine, smaxLine, vmaxLine), maskLine);
 
         kernel = getStructuringElement(MORPH_ELLIPSE, Size(20, 20));
         morphologyEx(maskLapangan, maskLapangan, MORPH_CLOSE, kernel);
 
-        vector<vector<Point>> contoursLapangan, contoursBall, contoursTeamA, contoursLine;
-        vector<Vec4i> hierarchyLapangan, hierarchyBall, hierarchyTeamA, hierarchyLine;
+        vector<vector<Point>> contoursLapangan, contoursBall, contoursTeamA, contoursLine, contoursTeamB;
+        vector<Vec4i> hierarchyLapangan, hierarchyBall, hierarchyTeamA, hierarchyLine, hierarchyTeamB;
         findContours(maskLapangan, contoursLapangan, hierarchyLapangan, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
         findContours(maskTeamA, contoursTeamA, hierarchyTeamA, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
         findContours(maskBall, contoursBall, hierarchyBall, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+        findContours(maskTeamB, contoursTeamB, hierarchyTeamB, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
 
         vector<Rect> boundingRects;
         Rect largestRectLapangan;
@@ -65,7 +80,7 @@ int main(int, char **)
         for (size_t i = 0; i < contoursLapangan.size(); i++)
         {
             double area = contourArea(contoursLapangan[i]);
-            if (area > thresholdAreaTimA)
+            if (area > thresholdAreaLapangan)
             {
                 Rect boundingRectLapangan = boundingRect(contoursLapangan[i]);
                 bool merged = false;
@@ -131,8 +146,68 @@ int main(int, char **)
             }
         }
 
+        vector<Rect> boundingRectsTeamA;
+        for (size_t j = 0; j < contoursTeamA.size(); j++)
+        {
+            double areaTeamA = contourArea(contoursTeamA[j]);
+            if (areaTeamA > thresholdAreaTimA)
+            {
+                Rect boundingRectTeamA = boundingRect(contoursTeamA[j]);
+                if ((boundingRectTeamA & largestRectLapangan).area() > 0)
+                {
+                    bool merged = false;
+
+                    for (auto &rect : boundingRectsTeamA)
+                    {
+                        rect |= boundingRectTeamA;
+                        merged = true;
+                    }
+
+                    if (!merged)
+                    {
+                        boundingRectsTeamA.push_back(boundingRectTeamA);
+                    }
+                }
+            }
+        }
+
+        for (const auto &rect : boundingRectsTeamA)
+        {
+            rectangle(frame, rect, Scalar(0, 0, 255), 2);
+        }
+
+        vector<Rect> boundingRectsTeamB;
+        for (size_t j = 0; j < contoursTeamB.size(); j++)
+        {
+            double areaTeamB = contourArea(contoursTeamB[j]);
+            if (areaTeamB > thresholdAreaTimA)
+            {
+                Rect boundingRectTeamB = boundingRect(contoursTeamB[j]);
+                if ((boundingRectTeamB & largestRectLapangan).area() > 0)
+                {
+                    bool merged = false;
+
+                    for (auto &rect : boundingRectsTeamB)
+                    {
+                        rect |= boundingRectTeamB;
+                        merged = true;
+                    }
+
+                    if (!merged)
+                    {
+                        boundingRectsTeamB.push_back(boundingRectTeamB);
+                    }
+                }
+            }
+        }
+
+        for (const auto &rect : boundingRectsTeamB)
+        {
+            rectangle(frame, rect, Scalar(255, 0, 0), 2);
+        }
+
         imshow("Frame", frame);
-        imshow("Mask Lapangan", maskLapangan);
+        imshow("Mask Lapangan", maskTeamB);
 
         if (waitKey(18) == 27)
             break;
