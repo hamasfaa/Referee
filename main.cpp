@@ -1,5 +1,6 @@
 #include <iostream>
 #include <opencv2/opencv.hpp>
+#include <cmath>
 
 using namespace std;
 using namespace cv;
@@ -27,21 +28,57 @@ int hmaxLine = 255, smaxLine = 255, vmaxLine = 255;
 static const double thresholdAreaTimA = 150.0;
 static const double thresholdAreaLapangan = 150.0;
 static const double thresholdAreaBall = 150.0;
+static const double toleranceDistance = 50.0;
+
+enum BallStatus
+{
+    NONE,
+    TEAM_A,
+    TEAM_B
+};
+
+double calculateDistance(Point2f a, Point2f b)
+{
+    return sqrt(pow(a.x - b.x, 2) + pow(a.y - b.y, 2));
+}
+
+double calculateMinDistance(Point2f point, Rect rect)
+{
+    Point2f rectPoints[4];
+    rectPoints[0] = Point2f(rect.x, rect.y);
+    rectPoints[1] = Point2f(rect.x + rect.width, rect.y);
+    rectPoints[2] = Point2f(rect.x, rect.y + rect.height);
+    rectPoints[3] = Point2f(rect.x + rect.width, rect.y + rect.height);
+
+    double minDistance = calculateDistance(point, rectPoints[0]);
+    for (int i = 1; i < 4; ++i)
+    {
+        double distance = calculateDistance(point, rectPoints[i]);
+        if (distance < minDistance)
+        {
+            minDistance = distance;
+        }
+    }
+
+    return minDistance;
+}
 
 int main(int, char **)
 {
-    string path = "../video/video2.mp4";
+    string path = "../video/video3.mp4";
     VideoCapture cap(path);
     Mat frame, frameHSV, frameBlur, frameHSL;
     Mat maskLapangan, maskTeamA, kernel, maskBall, maskLine, maskTeamB;
 
-    namedWindow("TrackbarsTeamB", (640, 200));
-    createTrackbar("Hue Min", "TrackbarsTeamB", &hminTeamB, 255);
-    createTrackbar("Hue Max", "TrackbarsTeamB", &hmaxTeamB, 255);
-    createTrackbar("Sat Min", "TrackbarsTeamB", &sminTeamB, 255);
-    createTrackbar("Sat Max", "TrackbarsTeamB", &smaxTeamB, 255);
-    createTrackbar("Val Min", "TrackbarsTeamB", &vminTeamB, 255);
-    createTrackbar("Val Max", "TrackbarsTeamB", &vmaxTeamB, 255);
+    BallStatus lastBallStatus = NONE;
+
+    // namedWindow("TrackbarsTeamB", (640, 200));
+    // createTrackbar("Hue Min", "TrackbarsTeamB", &hminTeamB, 255);
+    // createTrackbar("Hue Max", "TrackbarsTeamB", &hmaxTeamB, 255);
+    // createTrackbar("Sat Min", "TrackbarsTeamB", &sminTeamB, 255);
+    // createTrackbar("Sat Max", "TrackbarsTeamB", &smaxTeamB, 255);
+    // createTrackbar("Val Min", "TrackbarsTeamB", &vminTeamB, 255);
+    // createTrackbar("Val Max", "TrackbarsTeamB", &vmaxTeamB, 255);
 
     while (true)
     {
@@ -72,7 +109,7 @@ int main(int, char **)
         findContours(maskBall, contoursBall, hierarchyBall, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
         findContours(maskTeamB, contoursTeamB, hierarchyTeamB, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
 
-        vector<Rect> boundingRects;
+        vector<Rect> boundingRects, boundingRectsTeamA, boundingRectsTeamB;
         Rect largestRectLapangan;
         int largestIndex = -1;
         double maxArea = 0;
@@ -114,39 +151,6 @@ int main(int, char **)
             rectangle(frame, rect, Scalar(0, 255, 0), 2);
         }
 
-        for (size_t k = 0; k < contoursBall.size(); k++)
-        {
-            double areaBall = contourArea(contoursBall[k]);
-            if (areaBall < thresholdAreaBall)
-            {
-                continue;
-            }
-
-            Point2f center;
-            float radius;
-            minEnclosingCircle(contoursBall[k], center, radius);
-            bool isBallInsideLapangan = false;
-
-            if (largestIndex != -1)
-            {
-                if (largestRectLapangan.contains(center))
-                {
-                    isBallInsideLapangan = true;
-                }
-            }
-
-            circle(frame, center, (int)radius, Scalar(0, 255, 0), 2);
-            if (isBallInsideLapangan)
-            {
-                putText(frame, "Bola di dalam lapangan", Point(10, 50), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
-            }
-            else
-            {
-                putText(frame, "Bola di luar lapangan", Point(10, 50), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 0, 255), 2);
-            }
-        }
-
-        vector<Rect> boundingRectsTeamA;
         for (size_t j = 0; j < contoursTeamA.size(); j++)
         {
             double areaTeamA = contourArea(contoursTeamA[j]);
@@ -176,7 +180,6 @@ int main(int, char **)
             rectangle(frame, rect, Scalar(0, 0, 255), 2);
         }
 
-        vector<Rect> boundingRectsTeamB;
         for (size_t j = 0; j < contoursTeamB.size(); j++)
         {
             double areaTeamB = contourArea(contoursTeamB[j]);
@@ -206,8 +209,76 @@ int main(int, char **)
             rectangle(frame, rect, Scalar(255, 0, 0), 2);
         }
 
+        for (size_t k = 0; k < contoursBall.size(); k++)
+        {
+            double areaBall = contourArea(contoursBall[k]);
+            if (areaBall < thresholdAreaBall)
+            {
+                continue;
+            }
+
+            Point2f center;
+            float radius;
+            minEnclosingCircle(contoursBall[k], center, radius);
+            bool isBallInsideLapangan = false;
+            bool isBallInTeamA = false;
+            bool isBallInTeamB = false;
+
+            if (largestIndex != -1)
+            {
+                if (largestRectLapangan.contains(center))
+                {
+                    isBallInsideLapangan = true;
+                }
+            }
+
+            for (const auto &rect : boundingRectsTeamA)
+            {
+                double distance = calculateMinDistance(center, rect);
+                if (distance < radius + toleranceDistance)
+                {
+                    isBallInTeamA = true;
+                    lastBallStatus = TEAM_A;
+                    break;
+                }
+            }
+
+            for (const auto &rect : boundingRectsTeamB)
+            {
+                double distance = calculateMinDistance(center, rect);
+                if (distance < radius + toleranceDistance)
+                {
+                    isBallInTeamB = true;
+                    lastBallStatus = TEAM_B;
+                    break;
+                }
+            }
+
+            circle(frame, center, (int)radius, Scalar(0, 255, 0), 2);
+            if (isBallInsideLapangan)
+            {
+                putText(frame, "Bola di dalam lapangan", Point(10, 50), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 0), 2);
+                if (lastBallStatus == TEAM_A)
+                {
+                    putText(frame, "Bola disentuh Tim A", Point(10, 100), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 0, 255), 2);
+                }
+                else if (lastBallStatus == TEAM_B)
+                {
+                    putText(frame, "Bola disentuh Tim B", Point(10, 100), FONT_HERSHEY_SIMPLEX, 1, Scalar(255, 0, 0), 2);
+                }
+                else
+                {
+                    putText(frame, "Bola tidak disentuh Tim A/B", Point(10, 100), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 255, 255), 2);
+                }
+            }
+            else
+            {
+                putText(frame, "Bola di luar lapangan", Point(10, 50), FONT_HERSHEY_SIMPLEX, 1, Scalar(0, 0, 255), 2);
+            }
+        }
+
         imshow("Frame", frame);
-        imshow("Mask Lapangan", maskTeamB);
+        imshow("Mask Lapangan", maskLapangan);
 
         if (waitKey(18) == 27)
             break;
